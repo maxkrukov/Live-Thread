@@ -30,8 +30,10 @@ jobs:
       - name: Run unit tests
         run: pytest -v
 
-      - name: Validate shell installer and frontend JS syntax
+      - name: Validate shell installer and frontend JS
         run: |
           bash -n scripts/install.sh
+          node --check live_thread/web/markdown.js
           node --check live_thread/web/app.js
           node --check live_thread/web/i18n.js
+          node --test tests/test_markdown.mjs

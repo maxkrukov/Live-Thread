@@ -1,4 +1,5 @@
 import { LANGS, pickLanguage, setLanguage, t } from './i18n.js';
+import { esc, renderMarkdown } from './markdown.js';
 
 const $ = s => document.querySelector(s);
 const api = (path, body) => fetch('/api/' + path, body === undefined ? {} :
@@ -17,80 +18,7 @@ const SVG = {
 let state = { listening: false, settings: {}, boot: null, metricsOpen: false };
 
 // ----------------------------------------------------------------- helpers
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
-function fmtInline(s) {
-  const codes = [];
-  let out = esc(s).replace(/`([^`]+)`/g, (_, c) => {
-    codes.push(`<code>${c}</code>`);
-    return `\u0000${codes.length - 1}\u0000`;
-  });
-  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    (_, label, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`);
-  out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  out = out.replace(/~~(.+?)~~/g, '<del>$1</del>');
-  out = out.replace(/(^|[\s(—–-])\*([^*\n]+?)\*(?=$|[\s.,;:!?)\u2014\u2013-])/g, '$1<em>$2</em>');
-  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[Number(i)]);
-}
-function renderMarkdown(md) {
-  const lines = String(md ?? '').replace(/\r\n?/g, '\n').split('\n');
-  const out = [];
-  let i = 0;
-  const splitRow = l => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
-  const isSep = l => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(l);
-  const isHr = l => /^\s*([-*_])\s*\1\s*\1[\s\1]*$/.test(l);
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!line.trim()) { i++; continue; }
-    if (/^\s*```/.test(line)) {
-      const buf = []; i++;
-      while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
-      if (i < lines.length) i++;
-      out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`);
-      continue;
-    }
-    if (line.includes('|') && i + 1 < lines.length && isSep(lines[i + 1])) {
-      const head = splitRow(line);
-      i += 2;
-      const rows = [];
-      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) rows.push(splitRow(lines[i++]));
-      out.push('<div class="md-table-wrap"><table><thead><tr>' +
-        head.map(c => `<th>${fmtInline(c)}</th>`).join('') + '</tr></thead><tbody>' +
-        rows.map(r => '<tr>' + head.map((_, idx) => `<td>${fmtInline(r[idx] ?? '')}</td>`).join('') + '</tr>').join('') +
-        '</tbody></table></div>');
-      continue;
-    }
-    if (isHr(line)) { out.push('<hr>'); i++; continue; }
-    const mh = line.match(/^\s*#{1,4}\s+(.+)/);
-    if (mh) { out.push(`<div class="md-h">${fmtInline(mh[1].trim())}</div>`); i++; continue; }
-    if (/^\s*>\s?/.test(line)) {
-      const buf = [];
-      while (i < lines.length && /^\s*>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''));
-      out.push(`<blockquote>${buf.map(fmtInline).join('<br>')}</blockquote>`);
-      continue;
-    }
-    if (/^\s*[-*•]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*•]\s+/, ''));
-      out.push('<ul>' + items.map(x => `<li>${fmtInline(x)}</li>`).join('') + '</ul>');
-      continue;
-    }
-    if (/^\s*\d+[.)]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*\d+[.)]\s+/, ''));
-      out.push('<ol>' + items.map(x => `<li>${fmtInline(x)}</li>`).join('') + '</ol>');
-      continue;
-    }
-    const buf = [];
-    while (i < lines.length && lines[i].trim() && !isHr(lines[i]) &&
-      !/^\s*(```|#{1,4}\s|>\s?|[-*•]\s|\d+[.)]\s)/.test(lines[i]) &&
-      !(lines[i].includes('|') && i + 1 < lines.length && isSep(lines[i + 1]))) {
-      buf.push(lines[i++].trim());
-    }
-    out.push(`<p>${buf.map(fmtInline).join('<br>')}</p>`);
-  }
-  return out.join('');
-}
 const clock = ts => new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const sec = v => v == null ? '—' : v < 10 ? v.toFixed(1) : Math.round(v);
 const debounce = (fn, ms) => { let h; return (...a) => { clearTimeout(h); h = setTimeout(() => fn(...a), ms); }; };
@@ -157,6 +85,13 @@ if ($('#uiLang')) $('#uiLang').onchange = e => { applyLanguage(e.target.value); 
 function syncPinnedBox() {
   const p = $('#pinned');
   p.hidden = p.children.length === 0;
+  document.querySelectorAll('#topics .topic').forEach(tp => {
+    if (tp.dataset.placeholder === '1') {
+      const hasNotes = tp.querySelector('.notes')?.children.length > 0;
+      const hasBrief = !tp.querySelector('.brief')?.hidden;
+      tp.hidden = !hasNotes && !hasBrief;
+    }
+  });
 }
 function topicEl(id, title, revive = false) {
   $('#empty')?.remove();
@@ -166,6 +101,7 @@ function topicEl(id, title, revive = false) {
   if (el) { el.classList.remove('old'); $('#topics').prepend(el); return el; }
   el = document.createElement('section');
   el.className = 'topic'; el.id = 'topic-' + id;
+  if (!title || title === '—') el.dataset.placeholder = '1';
   const expBtn = title && title !== '—'
     ? `<button type="button" class="topic-exp" title="${esc(t('expand_topic'))}" aria-label="${esc(t('expand_topic'))}">${SVG.expand}</button>` : '';
   el.innerHTML = `<h2><span class="dot"></span><span>${esc(title)}</span>${expBtn}</h2><div class="brief" hidden></div><div class="notes"></div>`;
@@ -233,10 +169,10 @@ function addNote(id, n, fresh = true) {
   if (delBtn) delBtn.onclick = () => api('note/dismiss', { id: n.id });
   if (n.pinned) {
     $('#pinned').prepend(d);
-    syncPinnedBox();
   } else {
     el.querySelector('.notes').prepend(d);
   }
+  syncPinnedBox();
   updateCounts();
 }
 function updateNote(ev) {
