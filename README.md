@@ -43,7 +43,7 @@ system audio (+ mic) ──► energy VAD phrases ──► speech-to-text ─�
 ## Installation
 
 ```bash
-git clone <repo-url> live-thread && cd live-thread
+git clone https://github.com/maxkrukov/Live-Thread.git live-thread && cd live-thread
 ./scripts/install.sh            # --no-diarization to skip speaker separation, --no-desktop to skip desktop entry
 live-thread                     # or launch "Live Thread" from the application menu
 ```

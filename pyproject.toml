@@ -39,6 +39,11 @@ dev = [
     "ruff>=0.6",
 ]
 
+[project.urls]
+Homepage = "https://github.com/maxkrukov/Live-Thread"
+Repository = "https://github.com/maxkrukov/Live-Thread"
+Issues = "https://github.com/maxkrukov/Live-Thread/issues"
+
 [project.scripts]
 live-thread = "live_thread.__main__:main"
 

@@ -43,7 +43,7 @@
 ## Встановлення
 
 ```bash
-git clone <repo-url> live-thread && cd live-thread
+git clone https://github.com/maxkrukov/Live-Thread.git live-thread && cd live-thread
 ./scripts/install.sh            # --no-diarization — без розділення мовців, --no-desktop — без ярлика в меню
 live-thread                     # або запустіть «Live Thread» з меню застосунків
 ```

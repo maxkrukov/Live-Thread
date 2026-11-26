@@ -5,7 +5,7 @@ Thank you for your interest in contributing to Live Thread!
 ## Development Setup
 
 ```bash
-git clone <repo-url> live-thread && cd live-thread
+git clone https://github.com/maxkrukov/Live-Thread.git live-thread && cd live-thread
 python3 -m venv .venv
 .venv/bin/pip install -e ".[diarization,dev]" ruff
 ```
