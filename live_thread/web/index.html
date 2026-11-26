@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Live Thread</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="tb-left">
+    <div class="brand" title="Live Thread">
+      <svg class="brand-ic" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect x="2" y="8" width="2.5" height="4" rx="1.25" fill="currentColor" opacity=".55"/>
+        <rect x="6.5" y="4.5" width="2.5" height="11" rx="1.25" fill="currentColor"/>
+        <rect x="11" y="2.5" width="2.5" height="15" rx="1.25" fill="currentColor"/>
+        <rect x="15.5" y="6.5" width="2.5" height="7" rx="1.25" fill="currentColor" opacity=".7"/>
+      </svg>
+      <h1>Live Thread</h1>
+    </div>
+
+    <div class="ctl-group listen-group">
+      <button id="btnListen" class="btn primary" data-i18n-title="listen_title">
+        <span class="btn-ic" id="listenIc" aria-hidden="true"></span>
+        <span class="btn-lbl" id="listenLbl" data-i18n="listen"></span>
+      </button>
+      <div class="meter" aria-hidden="true"><i id="lv"></i></div>
+    </div>
+
+    <div class="ctl-group mode-group">
+      <button id="btnQA" class="btn qa-toggle" aria-pressed="false" data-i18n-title="qa_toggle_title">
+        <span class="qa-dot" aria-hidden="true"></span>
+        <span data-i18n="qa_toggle"></span>
+      </button>
+      <select id="preset" class="ctl-select" data-i18n-title="preset_title" aria-label="Mode"></select>
+    </div>
+  </div>
+
+  <div class="tb-mid">
+    <span id="status" role="status" aria-live="polite"></span>
+  </div>
+
+  <div class="tb-right">
+    <div id="winctl" class="ctl-group winctl" hidden>
+      <label class="opacity-wrap" data-i18n-title="opacity">
+        <span class="sr" data-i18n="opacity"></span>
+        <input id="opacity" type="range" min="30" max="100" step="5" data-i18n-title="opacity">
+      </label>
+      <button id="btnPin" class="btn icon" data-i18n-title="pin" aria-pressed="false" aria-label="Keep on top">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+      </button>
+    </div>
+
+    <label class="lang-ctl" data-i18n-title="thread_lang">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/></svg>
+      <select id="threadLang" class="ctl-select" aria-label="Thread language"></select>
+    </label>
+
+    <div class="tb-sep" aria-hidden="true"></div>
+
+    <div class="ctl-group tool-group">
+      <button id="btnSummary" class="btn icon" data-i18n-title="summary_title" aria-label="Summary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/><path d="M8 9h2"/></svg>
+      </button>
+      <button id="btnHistory" class="btn icon" data-i18n-title="history_title" aria-expanded="false" aria-label="History">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      </button>
+      <button id="btnMetrics" class="btn icon" data-i18n-title="metrics" aria-expanded="false" aria-label="Metrics">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+      </button>
+      <button id="btnNow" class="btn icon" data-i18n-title="refresh" aria-label="Refresh">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+      </button>
+    </div>
+
+    <div class="tb-sep" aria-hidden="true"></div>
+
+    <div class="ctl-group end-group">
+      <button id="btnReset" class="btn ghost" data-i18n="newSession" data-i18n-title="newSessionTitle"></button>
+      <button id="btnSettings" class="btn icon" data-i18n-title="settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<section class="subbar">
+  <div class="sub-context">
+    <div id="gist">
+      <span class="lbl" data-i18n="now"></span>
+      <span id="gistText">—</span>
+    </div>
+    <div id="profile" class="profile-pill" hidden>
+      <span id="profileIcon"></span>
+      <b id="profileType"></b>
+      <span id="profileTitle"></span>
+      <span id="profileWho"></span>
+    </div>
+  </div>
+
+  <div class="legend" id="legend" role="group" data-i18n-title="filter_hint">
+    <button class="kf k-clarify" data-kind="clarify" aria-pressed="true"><span data-i18n="kind_clarify"></span><i>0</i></button>
+    <button class="kf k-correct" data-kind="correct" aria-pressed="true"><span data-i18n="kind_correct"></span><i>0</i></button>
+    <button class="kf k-confirm" data-kind="confirm" aria-pressed="true"><span data-i18n="kind_confirm"></span><i>0</i></button>
+    <button class="kf k-add" data-kind="add" aria-pressed="true"><span data-i18n="kind_add"></span><i>0</i></button>
+    <button class="kf k-answer" data-kind="answer" aria-pressed="true"><span data-i18n="kind_answer"></span><i>0</i></button>
+  </div>
+</section>
+
+<div id="main">
+  <div id="thread">
+    <div class="thread-col">
+      <div id="pinned" hidden></div>
+      <div id="topics"><div class="empty" id="empty" data-i18n="empty"></div></div>
+    </div>
+  </div>
+
+  <aside id="history" class="drawer" hidden>
+    <div class="drawer-head">
+      <h2 data-i18n="h_title"></h2>
+      <input id="histSearch" type="search" data-i18n-placeholder="h_search">
+    </div>
+    <ul id="histList" class="hist-list"></ul>
+    <div id="histView" class="hist-view" hidden>
+      <div class="hist-bar">
+        <b id="histName"></b>
+        <div class="hist-acts">
+          <button type="button" id="btnHistCopy" class="btn icon sm" data-i18n-title="copy" aria-label="Copy">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button type="button" id="btnHistDl" class="btn icon sm" data-i18n-title="download" aria-label="Download">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          </button>
+          <button type="button" id="btnHistDel" class="btn icon sm danger" data-i18n-title="delete" aria-label="Delete">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="histBody" class="md"></div>
+    </div>
+  </aside>
+
+  <aside id="metrics" class="drawer" hidden>
+    <div class="drawer-head">
+      <h2 data-i18n="m_title"></h2>
+      <p class="hint" data-i18n="m_hint"></p>
+    </div>
+    <div class="drawer-body">
+      <div class="tiles" id="tiles"></div>
+      <h3 data-i18n="m_rejected"></h3>
+      <ul id="rejected" class="kv"></ul>
+      <p class="hint"><a href="/metrics" target="_blank" rel="noopener">/metrics</a> · <a href="/api/metrics" target="_blank" rel="noopener">/api/metrics</a></p>
+    </div>
+  </aside>
+</div>
+
+<footer>
+  <div class="footer-col">
+    <form id="askForm" class="ask-bar">
+      <div class="ask-wrap">
+        <svg class="ask-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="askInput" type="text" autocomplete="off" data-i18n-placeholder="ask_placeholder">
+        <kbd class="ask-kbd" aria-hidden="true">/</kbd>
+      </div>
+      <button type="submit" id="btnAsk" class="btn answer-btn" data-i18n="ask_btn" data-i18n-title="ask_btn_title"></button>
+    </form>
+    <div id="live" data-i18n-title="live_expand_hint"></div>
+  </div>
+</footer>
+
+<dialog id="dlg"><form method="dialog" id="form">
+  <h2 data-i18n="s_title"></h2>
+  <fieldset><legend data-i18n="s_model"></legend>
+    <label><span data-i18n="llm_url"></span><input name="llm_url" placeholder="http://localhost:8080/v1/chat/completions"></label>
+    <div class="row2">
+      <label><span data-i18n="llm_model"></span><input name="llm_model" placeholder="qwen3-32b"></label>
+      <label><span data-i18n="llm_api_key"></span><input name="llm_api_key" type="password" autocomplete="off"></label>
+    </div>
+  </fieldset>
+  <fieldset><legend data-i18n="s_stt"></legend>
+    <div class="row2">
+      <label><span data-i18n="stt_url"></span><input name="stt_url" placeholder="http://server:8090"></label>
+      <label><span data-i18n="stt_model"></span><select name="stt_model"><option>large-v3-turbo</option><option>medium</option><option>small</option></select></label>
+    </div>
+    <div class="row2">
+      <label><span data-i18n="stt_token"></span><input name="stt_token" type="password" autocomplete="off"></label>
+      <label><span data-i18n="whisper_model"></span><select name="whisper_model"><option>small</option><option>base</option><option>medium</option><option>large-v3-turbo</option></select></label>
+    </div>
+    <div class="row2">
+      <label><span data-i18n="language"></span><select name="language">
+        <option value="auto" data-i18n="lang_auto"></option><option value="en">English</option><option value="uk">Українська</option>
+        <option value="ru">Русский</option><option value="pl">Polski</option><option value="de">Deutsch</option></select></label>
+      <label><span data-i18n="use_mic"></span><select name="use_mic"><option value="false" data-i18n="no"></option><option value="true" data-i18n="yes"></option></select></label>
+    </div>
+    <div class="row2">
+      <label><span data-i18n="monitor_device"></span><select name="monitor_device" id="monDev"></select></label>
+      <label><span data-i18n="mic_device"></span><select name="mic_device" id="micDev"></select></label>
+    </div>
+    <label><span data-i18n="glossary"></span><textarea name="glossary" rows="3" placeholder="Kubernetes, Helm, StatefulSet, inode, fstab…"></textarea></label>
+  </fieldset>
+  <fieldset><legend data-i18n="s_thread"></legend>
+    <div class="row2">
+      <label><span data-i18n="preset_label"></span><select name="preset" id="presetSetting"></select></label>
+      <label><span data-i18n="notes_language"></span><select name="notes_language" id="threadLangSetting"></select></label>
+    </div>
+    <label><span data-i18n="context"></span><textarea name="context" rows="2"></textarea></label>
+    <div class="row2">
+      <label><span data-i18n="answer_questions"></span><select name="answer_questions"><option value="true" data-i18n="yes"></option><option value="false" data-i18n="no"></option></select></label>
+      <label><span data-i18n="diarization"></span><select name="diarization"><option value="true" data-i18n="yes"></option><option value="false" data-i18n="no"></option></select></label>
+    </div>
+    <label><span data-i18n="diar_threshold"></span><input name="diar_threshold" type="number" step="0.05" min="0.1" max="0.9"></label>
+  </fieldset>
+  <fieldset><legend data-i18n="s_ui"></legend>
+    <label><span data-i18n="ui_language"></span><select name="ui_language" id="uiLangSetting"></select></label>
+    <p class="hint" id="winNa" hidden data-i18n="window_control_na"></p>
+  </fieldset>
+  <div class="actions">
+    <button value="cancel" class="btn ghost" data-i18n="cancel"></button>
+    <button value="save" class="btn primary" data-i18n="save"></button>
+  </div>
+</form></dialog>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

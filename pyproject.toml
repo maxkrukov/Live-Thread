@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "live-thread"
+dynamic = ["version"]
+description = "Live topic thread with short notes for any conversation: speech recognition + any OpenAI-compatible LLM"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "faster-whisper>=1.0",
+]
+
+[project.optional-dependencies]
+diarization = [
+    "sherpa-onnx>=1.10",
+]
+dev = [
+    "pytest>=7",
+]
+
+[project.scripts]
+live-thread = "live_thread.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "live_thread.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["live_thread*"]
+
+[tool.setuptools.package-data]
+live_thread = ["web/*"]
