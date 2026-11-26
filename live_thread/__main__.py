@@ -1,4 +1,4 @@
-"""Запуск: python -m live_thread [--port N] [--no-open] [--listen] [--debug]"""
+"""CLI entry point: python -m live_thread [--port N] [--no-open] [--listen] [--debug]."""
 import argparse
 import logging
 import signal
@@ -15,11 +15,15 @@ log = logging.getLogger("live_thread")
 
 
 def open_window(url, engine):
-    """Відкриваємо вікно, лише якщо старе не перепідключилося само (EventSource робить це за ~3 с)."""
+    """Open a browser window only if an existing tab did not reconnect via SSE."""
     time.sleep(4)
     if not BUS.clients:
-        for cmd in (["google-chrome", f"--app={url}"], ["chromium-browser", f"--app={url}"],
-                    ["chromium", f"--app={url}"], ["xdg-open", url]):
+        for cmd in (
+            ["google-chrome", f"--app={url}"],
+            ["chromium-browser", f"--app={url}"],
+            ["chromium", f"--app={url}"],
+            ["xdg-open", url],
+        ):
             try:
                 subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 break
@@ -37,15 +41,18 @@ def main(argv=None):
     ap.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
     ap.add_argument("--no-open", action="store_true", help="do not open a browser window")
     ap.add_argument("--listen", action="store_true", help="start listening immediately")
-    ap.add_argument("--debug", action="store_true")
+    ap.add_argument("--debug", action="store_true", help="enable debug logging")
     ap.add_argument("--version", action="version", version=__version__)
     args = ap.parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 
     from .engine import Engine
+
     engine = Engine(config.load())
-    if not config.CONFIG_FILE.exists():          # перший запуск (або міграція) — одразу зберігаємо файл
+    if not config.CONFIG_FILE.exists():
         config.save(engine.settings)
     port = args.port or int(engine.settings["port"])
     srv = serve(engine, args.host, port)
@@ -60,6 +67,7 @@ def main(argv=None):
 
     def _term(*_):
         raise KeyboardInterrupt
+
     signal.signal(signal.SIGTERM, _term)
     try:
         srv.serve_forever()

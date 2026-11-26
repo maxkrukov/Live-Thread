@@ -1,4 +1,4 @@
-"""Онлайн-діаризація: хто говорить, по вікнах 1.5 с, без знання кількості мовців наперед."""
+"""Online speaker diarization in 1.5 s sliding windows without knowing speaker count upfront."""
 import os
 import threading
 from pathlib import Path
@@ -9,8 +9,10 @@ RATE = 16000
 WIN = int(1.5 * RATE)
 HOP = int(0.75 * RATE)
 MODEL_NAME = "nemo_en_titanet_small.onnx"
-MODEL_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
-             + MODEL_NAME)
+MODEL_URL = (
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
+    + MODEL_NAME
+)
 
 
 def model_path():
@@ -23,16 +25,19 @@ class Diarizer:
         import sherpa_onnx
         path = model_path()
         if not path.exists():
-            raise FileNotFoundError(f"speaker model not found: {path} (run scripts/install.sh or download {MODEL_URL})")
+            raise FileNotFoundError(
+                f"speaker model not found: {path} (run scripts/install.sh or download {MODEL_URL})"
+            )
         self.ex = sherpa_onnx.SpeakerEmbeddingExtractor(
-            sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(path), num_threads=threads))
+            sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(path), num_threads=threads)
+        )
         self.threshold = threshold
         self.max_speakers = max_speakers
-        self.centroids = []          # сума нормованих ембедингів
+        self.centroids = []          # sum of L2-normalized embeddings
         self.counts = []
-        self.ids = []                # стабільні id: S1, S2, ...
+        self.ids = []                # stable speaker IDs: S1, S2, ...
         self.next_id = 1
-        self.pending = None          # кандидат у нового мовця (чекає підтвердження наступним вікном)
+        self.pending = None          # candidate new speaker awaiting confirmation from next window
         self.lock = threading.Lock()
 
     def reset(self):
@@ -65,7 +70,7 @@ class Diarizer:
             self.centroids[best] += e
             self.counts[best] += 1
             return best
-        # не схоже ні на кого: новий мовець, але лише якщо це підтвердить і наступне вікно
+        # Unmatched voice: promote to a new speaker only after a second consistent window.
         if self.pending is not None and float(self.pending @ e) > self.threshold:
             k = self._new(self.pending + e) if len(self.centroids) < self.max_speakers else best
             self.pending = None
@@ -73,10 +78,10 @@ class Diarizer:
         if not self.centroids:
             return self._new(e)
         self.pending = e
-        return best                   # тимчасово — до найближчого відомого
+        return best                   # temporarily assign to closest known speaker
 
     def _merge(self):
-        """Зливаємо мовців, чиї центроїди стали дуже схожими. Повертає мапу {видалений_id: лишений_id}."""
+        """Merge speakers whose centroids have converged. Returns {dropped_id: kept_id}."""
         remap = {}
         i = 0
         while i < len(self.centroids):
@@ -99,7 +104,7 @@ class Diarizer:
         return remap
 
     def label_windows(self, audio):
-        """Повертає список (t_start, t_end, speaker_id) для вікон сегмента."""
+        """Return smoothed (t_start, t_end, speaker_id) labels for windows of an audio segment."""
         with self.lock:
             out = []
             if len(audio) < WIN:
@@ -122,8 +127,8 @@ class Diarizer:
 
 
 def _smooth(labels):
-    """Прибираємо поодинокі «вкраплення» іншого мовця між двома однаковими."""
-    lab = [l[2] for l in labels]
+    """Remove isolated single-window speaker flips surrounded by the same speaker."""
+    lab = [item[2] for item in labels]
     for i in range(1, len(lab) - 1):
         if lab[i - 1] == lab[i + 1] != lab[i]:
             lab[i] = lab[i - 1]
@@ -131,9 +136,10 @@ def _smooth(labels):
 
 
 def split_words(words, labels, default="S1"):
-    """Розкладає слова Whisper по мовцях за часом.
+    """Assign timestamped Whisper words to speakers.
 
-    words: [(start, end, text)] → [(speaker, text, t_start, t_end)]"""
+    words: [(start, end, text)] -> [(speaker, text, t_start, t_end)]
+    """
     if not words:
         return []
     if not labels:
@@ -141,13 +147,13 @@ def split_words(words, labels, default="S1"):
     groups = []                       # [spk, [words]]
     for w in words:
         mid = (w[0] + w[1]) / 2
-        # вікно, центр якого найближчий до середини слова
-        spk = min(labels, key=lambda l: abs((l[0] + l[1]) / 2 - mid))[2]
+        # Pick the window whose center is closest to the word midpoint.
+        spk = min(labels, key=lambda item: abs((item[0] + item[1]) / 2 - mid))[2]
         if groups and groups[-1][0] == spk:
             groups[-1][1].append(w)
         else:
             groups.append([spk, [w]])
-    # дуже короткі шматки (1–2 слова) приклеюємо до попереднього
+    # Merge tiny 1-2 word fragments into the preceding speaker turn.
     merged = []
     for spk, ws in groups:
         if merged and len(ws) <= 2:

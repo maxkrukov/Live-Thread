@@ -98,7 +98,7 @@ const debounce = (fn, ms) => { let h; return (...a) => { clearTimeout(h); h = se
 function status(text) { $('#status').textContent = text; }
 
 // ----------------------------------------------------------------- thread language
-// значення — назва мови англійською (йде в промпт), підпис — самоназва мови
+// Value is the English language name sent to the LLM prompt; label is the native name.
 const THREAD_LANGS = [['Ukrainian', 'Українська'], ['English', 'English'], ['Russian', 'Русский'],
   ['Polish', 'Polski'], ['German', 'Deutsch'], ['Spanish', 'Español'], ['French', 'Français'],
   ['Italian', 'Italiano'], ['Portuguese', 'Português'], ['Czech', 'Čeština'], ['Turkish', 'Türkçe']];
@@ -114,7 +114,7 @@ function fillThreadLangs() {
 $('#threadLang').onchange = async e => {
   const r = await api('settings', { notes_language: e.target.value });
   state.settings = r.settings;
-  api('refresh', {});                     // одразу перегенерувати «Зараз» і нотатки новою мовою
+  api('refresh', {});                     // immediately refresh gist and notes in the new language
 };
 
 const PRESETS = ['auto', 'interview', 'lecture', 'meeting', 'media'];
@@ -333,7 +333,7 @@ function setProfile(p) {
 }
 function setListening(on) {
   state.listening = on;
-  if (state.profile) setProfile(state.profile);    // перекласти підпис типу після зміни мови
+  if (state.profile) setProfile(state.profile);    // re-translate content type label after UI language change
   const b = $('#btnListen');
   $('#listenIc').innerHTML = on ? SVG.stop : SVG.play;
   $('#listenLbl').textContent = on ? t('stop') : t('listen');
@@ -484,7 +484,7 @@ function connect() {
   es.onmessage = e => {
     const ev = JSON.parse(e.data);
     switch (ev.type) {
-      case 'hello':                         // сервер перезапустився — перезавантажуємо; інакше дотягуємо пропущене
+      case 'hello':                         // reload on server restart; otherwise resync missed events
         if (state.boot && state.boot !== ev.boot) { location.reload(); break; }
         state.boot = ev.boot;
         if (disconnected) { disconnected = false; status(''); syncState(); }

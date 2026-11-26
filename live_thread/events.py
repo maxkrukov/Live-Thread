@@ -1,4 +1,4 @@
-"""Шина подій для веб-інтерфейсу (Server-Sent Events)."""
+"""In-process pub/sub event bus for Server-Sent Events (SSE)."""
 import json
 import queue
 import threading
@@ -26,11 +26,12 @@ class Bus:
             for q in self.clients:
                 try:
                     q.put_nowait(msg)
-                except queue.Full:            # повільний клієнт — пропускаємо подію, а не блокуємо все
+                except queue.Full:
+                    # Drop events for slow clients instead of blocking producers.
                     pass
 
     def status(self, code, **params):
-        """Статус для інтерфейсу: код + параметри, переклад робить сам інтерфейс."""
+        """Emit a localized UI status code with optional template parameters."""
         self.emit("status", code=code, params=params)
 
 

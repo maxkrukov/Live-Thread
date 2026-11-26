@@ -1,4 +1,4 @@
-"""Розпізнавання мови: віддалений сервер (server/stt_server.py) з локальним резервом faster-whisper."""
+"""Speech-to-text worker: optional remote STT server with local faster-whisper fallback."""
 import json
 import logging
 import os
@@ -18,22 +18,21 @@ from .metrics import METRICS
 
 log = logging.getLogger(__name__)
 
-ALLOWED = ("en", "uk", "ru", "pl", "de")   # у режимі «авто» обираємо лише з цих мов
-BATCH_MAX = 24.0                           # секунд звуку в одному запиті
-REMOTE_RETRY = 30.0                        # після збою сервера — стільки секунд локально
-MAX_COMPRESSION_RATIO = 2.4                # поріг зацикленої галюцинації Whisper
+ALLOWED = ("en", "uk", "ru", "pl", "de")   # candidate languages in auto-detect mode
+BATCH_MAX = 24.0                           # max seconds of audio per STT request
+REMOTE_RETRY = 30.0                        # seconds to stay on local fallback after remote error
+MAX_COMPRESSION_RATIO = 2.4                # threshold for Whisper repetition hallucinations
 _REPEAT_LOOP = re.compile(r"(\b\w{2,}(?:[,.\s]+\w{2,}){0,2}\b)(?:[,.\s]+\1){3,}", re.I)
 
 
 def clean_hallucination(text):
-    """Прибирає типові зациклення Whisper («Верховного, Верховного, Верховного…»)."""
+    """Strip typical Whisper repetition loops; drop segments that were mostly repetition."""
     s = (text or "").strip()
     if not s:
         return ""
     words_before = len(re.findall(r"\w+", s))
     cleaned = _REPEAT_LOOP.sub(r"\1", s).strip(" ,;.")
     words_after = len(re.findall(r"\w+", cleaned))
-    # якщо більшість сегмента була зацикленням — відкидаємо весь сегмент як галюцинацію
     if words_before >= 8 and words_after < words_before * 0.4:
         return ""
     return cleaned
@@ -48,38 +47,54 @@ class Transcriber(threading.Thread):
         self._model_name = None
         self._diarizer = None
         self._diar_failed = False
-        self.extra_terms = ""         # імена й терміни з автоматичного профілю вмісту
+        self.extra_terms = ""         # names and terms from the auto-detected content profile
 
     def prompt(self):
-        """Підказка для Whisper: словник користувача + терміни з профілю (обрізаємо до ~600 символів)."""
+        """Build Whisper initial_prompt from user glossary and detected content terms (<= 600 chars)."""
         parts = [x for x in ((self.settings.get("glossary") or "").strip(), self.extra_terms.strip()) if x]
         return ", ".join(parts)[:600]
 
-    # -- бекенди
+    # -- backends
     def _load_local(self):
         from faster_whisper import WhisperModel
         name = self.settings["whisper_model"]
         BUS.status("whisper_loading", model=name)
-        self.model = WhisperModel(name, device="cpu", compute_type="int8",
-                                  cpu_threads=max(2, (os.cpu_count() or 4) - 2))
+        self.model = WhisperModel(
+            name, device="cpu", compute_type="int8",
+            cpu_threads=max(2, (os.cpu_count() or 4) - 2),
+        )
         self._model_name = name
         BUS.status("whisper_ready", model=name)
 
     def _remote(self, audio, words):
         s = self.settings
-        q = urllib.parse.urlencode({"language": s["language"], "words": int(words),
-                                    "model": s.get("stt_model") or "large-v3-turbo"})
+        q = urllib.parse.urlencode({
+            "language": s["language"],
+            "words": int(words),
+            "model": s.get("stt_model") or "large-v3-turbo",
+        })
         pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes()
         req = urllib.request.Request(
-            s["stt_url"].rstrip("/") + "/transcribe?" + q, data=pcm,
-            headers={"Authorization": f"Bearer {s.get('stt_token', '')}",
-                     "X-Prompt": urllib.parse.quote(self.prompt()),
-                     "Content-Type": "application/octet-stream"})
+            s["stt_url"].rstrip("/") + "/transcribe?" + q,
+            data=pcm,
+            headers={
+                "Authorization": f"Bearer {s.get('stt_token', '')}",
+                "X-Prompt": urllib.parse.quote(self.prompt()),
+                "Content-Type": "application/octet-stream",
+            },
+        )
         with urllib.request.urlopen(req, timeout=30) as r:
             d = json.load(r)
-        return [NS(text=g["text"], no_speech_prob=g["no_speech_prob"], avg_logprob=g["avg_logprob"],
-                   compression_ratio=g.get("compression_ratio", 0.0),
-                   words=[NS(start=a, end=b, word=w) for a, b, w in g["words"]]) for g in d["segments"]]
+        return [
+            NS(
+                text=g["text"],
+                no_speech_prob=g["no_speech_prob"],
+                avg_logprob=g["avg_logprob"],
+                compression_ratio=g.get("compression_ratio", 0.0),
+                words=[NS(start=a, end=b, word=w) for a, b, w in g["words"]],
+            )
+            for g in d["segments"]
+        ]
 
     def _local(self, audio, words):
         if self.model is None or self._model_name != self.settings["whisper_model"]:
@@ -92,9 +107,14 @@ class Transcriber(threading.Thread):
             except Exception:
                 lang = None
         segs, _ = self.model.transcribe(
-            audio, language=lang, beam_size=1, word_timestamps=words,
+            audio,
+            language=lang,
+            beam_size=1,
+            word_timestamps=words,
             initial_prompt=(self.prompt() or None),
-            vad_filter=True, condition_on_previous_text=False)
+            vad_filter=True,
+            condition_on_previous_text=False,
+        )
         return list(segs)
 
     def diarizer(self):
@@ -108,9 +128,9 @@ class Transcriber(threading.Thread):
                 BUS.status("diar_unavailable", err=str(e))
         return self._diarizer
 
-    # -- черга
+    # -- queue batching
     def _take_batch(self):
-        """Whisper завжди рахує 30-секундне вікно, тож кілька фраз з черги одним запитом — майже безкоштовно."""
+        """Batch queued phrases from the same source up to BATCH_MAX seconds per Whisper window."""
         who, audio, t_end = self.q.get()
         if who is None:
             return None
@@ -164,9 +184,13 @@ class Transcriber(threading.Thread):
                 continue
             METRICS.observe("stt_request", time.time() - t0)
             METRICS.inc("stt_segments")
-            # відкидаємо типові галюцинації на тиші/шумі та зациклення
-            good = [s for s in segs if s.no_speech_prob < 0.6 and s.avg_logprob > -1.0
-                    and getattr(s, "compression_ratio", 0.0) < MAX_COMPRESSION_RATIO]
+            # Drop typical silence/noise hallucinations and repetition loops.
+            good = [
+                s for s in segs
+                if s.no_speech_prob < 0.6
+                and s.avg_logprob > -1.0
+                and getattr(s, "compression_ratio", 0.0) < MAX_COMPRESSION_RATIO
+            ]
             if not good:
                 continue
             seg_start = t_end - len(audio) / RATE

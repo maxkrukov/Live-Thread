@@ -1,4 +1,4 @@
-"""Захоплення звуку з PipeWire/PulseAudio і нарізка на фрази за енергією."""
+"""PipeWire/PulseAudio audio capture (`parec`) and energy-based phrase segmentation."""
 import json
 import logging
 import shutil
@@ -26,7 +26,7 @@ def available():
 
 
 def list_devices():
-    """Повертає доступні монітори (виходи) та мікрофони з PipeWire/PulseAudio."""
+    """Return available monitor (output) and microphone sources from PipeWire/PulseAudio."""
     monitors, mics = [], []
     if not shutil.which("pactl"):
         return {"monitors": monitors, "mics": mics}
@@ -66,7 +66,7 @@ def list_devices():
 
 
 class Source(threading.Thread):
-    """Читає 16 кГц моно через `parec` і віддає фрази в on_segment(name, audio, t_end)."""
+    """Read 16 kHz mono PCM via `parec` and deliver speech phrases to on_segment(name, audio, t_end)."""
 
     def __init__(self, name, device, on_segment, on_exit=None):
         super().__init__(daemon=True, name=f"source-{name}")
@@ -125,8 +125,8 @@ class Source(threading.Thread):
                 is_voice = rms > max(0.008, noise * 3.0)
                 if not speaking:
                     if not is_voice:
-                        noise = 0.97 * noise + 0.03 * rms       # адаптивний рівень шуму
-                    pre = (pre + [x])[-10:]                       # 300 мс до початку мови
+                        noise = 0.97 * noise + 0.03 * rms       # adaptive noise floor
+                    pre = (pre + [x])[-10:]                       # 300 ms pre-roll before speech starts
                     if is_voice:
                         speaking, buf, silence, voiced = True, list(pre), 0.0, 0.0
                     continue
@@ -140,7 +140,7 @@ class Source(threading.Thread):
                         self.on_segment(self.name, np.concatenate(buf), time.time() - silence)
                     speaking, buf, pre = False, [], []
                 elif len(buf) * dt >= MAX_SEGMENT:
-                    # мовлення без пауз: ріжемо у найтихшому кадрі наприкінці, решту лишаємо в буфері
+                    # Continuous speech without pauses: split at the quietest trailing frame.
                     tail = int(CUT_SEARCH / dt)
                     energies = [float(np.mean(f * f)) for f in buf[-tail:]]
                     cut = len(buf) - tail + int(np.argmin(energies)) + 1

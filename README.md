@@ -1,8 +1,12 @@
 # Live Thread
 
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![Platform Linux](https://img.shields.io/badge/platform-Linux%20(PipeWire%20%2F%20PulseAudio)-informational)
+![License MIT](https://img.shields.io/badge/license-MIT-green)
+
 **A live topic thread for any conversation.** Live Thread listens to system audio (and optionally your microphone) during a video, call, lecture, interview, or podcast, recognises speech, works out *what is being discussed right now*, and keeps a live thread of concise notes next to it: **clarify · correct · confirm · add · answer**. When the conversation moves to a new subject it creates a topic card with an instant overview of key items.
 
-[Українська версія](README.uk.md)
+[Українська версія](README.uk.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
 ## Features
 
@@ -10,7 +14,7 @@
 - **Mode presets** — `auto`, `interview`, `lecture`, `meeting`, and `media` presets tailor prompts to your context.
 - **Q&A mode & ask bar** — catches spoken questions automatically and streams concise Markdown answers, or lets you ask a custom question at any time (`/` shortcut).
 - **Now line & topic cards** — a live ≤10-word gist of the current discussion, plus per-topic cards with instant overviews and pin/dismiss note controls.
-- **Fact-checked notes** — notes must add outside knowledge; duplicates, restatements, guesses, and ASR-error comments are filtered out, and corrections are verified in the background.
+- **Fact-checked notes** — notes must add outside knowledge; duplicates, restatements, guesses, and ASR-error comments are filtered out, and claims are verified before display.
 - **Speaker separation** — online speaker diarization (`S1`, `S2`, `S3`…) using `sherpa-onnx` + TitaNet (optional).
 - **Flexible audio sources** — captures PipeWire/PulseAudio system output (`@DEFAULT_MONITOR@`) and optionally your microphone (`@DEFAULT_SOURCE@`), with device selection in settings.
 - **Session summaries & history** — generate on-demand summaries and browse, search, copy, download, or delete saved Markdown sessions (`~/.config/live-thread/sessions/*.md`).
@@ -46,13 +50,25 @@ live-thread                     # or launch "Live Thread" from the application m
 
 Open **Settings (⚙)** in the web UI (`http://127.0.0.1:8765/`) and set at least the LLM endpoint (`llm_url`) and model name (`llm_model`). Configuration is saved to `~/.config/live-thread/config.json` with mode `600`. See [`config.example.json`](config.example.json) for all options.
 
-### CLI options
+### CLI Options
 
 ```bash
 live-thread [--port 8765] [--host 127.0.0.1] [--no-open] [--listen] [--debug] [--version]
 ```
 
-## Remote STT API (optional)
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `/` | Focus the Ask bar |
+| `Esc` | Blur input or close the open drawer |
+| `Alt + L` | Start / stop listening |
+| `Alt + Q` | Toggle Q&A mode |
+| `Alt + A` | Force answer on the latest transcript lines |
+| `Alt + S` | Generate a pinned Markdown session summary |
+| `Alt + H` | Toggle saved sessions history drawer |
+
+## Remote STT API (Optional)
 
 If `stt_url` is configured, Live Thread sends raw 16 kHz mono 16-bit signed little-endian PCM to:
 
@@ -87,15 +103,16 @@ If the remote server is unreachable, Live Thread automatically falls back to loc
 - `GET /api/metrics` — live metrics as JSON
 - `GET /metrics` — Prometheus metrics (`live_thread_e2e_note_seconds`, `live_thread_stt_lag_seconds`, `live_thread_llm_note_seconds`, `live_thread_notes_total`, `live_thread_notes_rejected_total`, `live_thread_notes_per_minute`, …)
 
-## Development
+## Development & Testing
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e '.[diarization,dev]'
+.venv/bin/pip install -e ".[diarization,dev]"
+.venv/bin/pytest -v
 .venv/bin/python -m live_thread --debug --no-open
 ```
 
-### Code map
+### Code Map
 
 - `live_thread/__main__.py` — CLI entrypoint and browser launcher
 - `live_thread/audio.py` — PipeWire/PulseAudio capture (`parec`) and energy VAD segmentation

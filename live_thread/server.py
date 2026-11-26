@@ -1,4 +1,4 @@
-"""HTTP-сервер: статичний веб-інтерфейс, REST API, події (SSE) та метрики."""
+"""HTTP server: static web UI, REST API, Server-Sent Events (SSE), and metrics."""
 import json
 import logging
 import mimetypes
@@ -20,7 +20,7 @@ BOOT_ID = f"{os.getpid()}-{int(time.time())}"
 
 
 def _session_path(name):
-    """Безпечно розв'язує ім'я файлу сесії (захист від path traversal)."""
+    """Safely resolve a saved session filename while preventing path traversal."""
     if not name or Path(name).name != name or not name.endswith(".md"):
         return None
     p = (config.SESSIONS_DIR / name).resolve()
@@ -56,9 +56,8 @@ def make_handler(engine):
         def log_message(self, fmt, *args):
             log.debug("%s %s", self.address_string(), fmt % args)
 
-        # -- helpers
         def _send(self, code, body, ctype):
-            b = body if isinstance(body, bytes) else body.encode()
+            b = body if isinstance(body, bytes) else body.encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(b)))
@@ -84,12 +83,11 @@ def make_handler(engine):
             return data if isinstance(data, dict) else None
 
         def _same_origin(self):
-            """Захист від CSRF: зміни приймаємо лише з нашої ж сторінки (або без Origin — напр. curl)."""
+            """Basic CSRF guard: allow same-origin browser requests and non-browser clients without Origin."""
             origin = self.headers.get("Origin")
             host = self.headers.get("Host", "")
-            return origin is None or origin.split("://", 1)[-1] == host
+            return origin is None or urllib.parse.urlparse(origin).netloc == host
 
-        # -- GET
         def do_GET(self):
             path = self.path.split("?", 1)[0]
             if path == "/":
@@ -97,14 +95,21 @@ def make_handler(engine):
             if path == "/api/state":
                 snap = engine.state_snapshot()
                 return self._json({
-                    "version": __version__, "boot": BOOT_ID, "settings": config.public(snap["settings"]),
-                    "listening": snap["listening"], "topics": snap["topics"], "gist": snap["gist"],
-                    "profile": snap["profile"], "transcript": snap["transcript"], "clients": len(BUS.clients),
-                    "window_control": window.supported()})
+                    "version": __version__,
+                    "boot": BOOT_ID,
+                    "settings": config.public(snap["settings"]),
+                    "listening": snap["listening"],
+                    "topics": snap["topics"],
+                    "gist": snap["gist"],
+                    "profile": snap["profile"],
+                    "transcript": snap["transcript"],
+                    "clients": len(BUS.clients),
+                    "window_control": window.supported(),
+                })
             if path == "/api/metrics":
                 return self._json(METRICS.snapshot())
             if path == "/metrics":
-                return self._send(200, METRICS.prometheus(), "text/plain; version=0.0.4")
+                return self._send(200, METRICS.prometheus(), "text/plain; version=0.0.4; charset=utf-8")
             if path == "/api/health":
                 return self._json({"ok": True, "version": __version__})
             if path == "/api/audio-devices":
@@ -139,7 +144,7 @@ def make_handler(engine):
                 while True:
                     try:
                         msg = q.get(timeout=15)
-                        self.wfile.write(f"data: {msg}\n\n".encode())
+                        self.wfile.write(f"data: {msg}\n\n".encode("utf-8"))
                     except queue.Empty:
                         self.wfile.write(b": ping\n\n")
                     self.wfile.flush()
@@ -149,7 +154,6 @@ def make_handler(engine):
                 BUS.unsubscribe(q)
                 METRICS.gauge("ui_clients", len(BUS.clients))
 
-        # -- POST
         def do_POST(self):
             if not self._same_origin():
                 return self._json({"error": "forbidden"}, 403)
@@ -207,10 +211,11 @@ def make_handler(engine):
     return Handler
 
 
-def metrics_pump(engine):
-    """Раз на 2 с шлемо метрики у відкриті вікна й періодично автозберігаємо сесію."""
-    while True:
-        time.sleep(2)
+def metrics_pump(engine, stop_event=None):
+    """Push live metrics to connected SSE clients every 2s and trigger periodic autosave."""
+    while not (stop_event and stop_event.wait(2)):
+        if stop_event is None:
+            time.sleep(2)
         try:
             if BUS.clients:
                 BUS.emit("metrics", **METRICS.snapshot())
@@ -219,8 +224,11 @@ def metrics_pump(engine):
             log.debug("metrics pump error: %s", e)
 
 
-def serve(engine, host="127.0.0.1", port=8765):
+def serve(engine, host="127.0.0.1", port=8765, start_pump=True):
     srv = ThreadingHTTPServer((host, port), make_handler(engine))
     srv.daemon_threads = True
-    threading.Thread(target=metrics_pump, args=(engine,), daemon=True, name="metrics").start()
+    if start_pump:
+        stop_event = threading.Event()
+        srv._pump_stop = stop_event
+        threading.Thread(target=metrics_pump, args=(engine, stop_event), daemon=True, name="metrics").start()
     return srv

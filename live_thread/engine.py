@@ -1,4 +1,4 @@
-"""Двигун живого треду: тема розмови, суть («зараз»), огляд теми та короткі нотатки."""
+"""Live thread engine: topic tracking, live gist, topic briefs, Q&A, fact-checking, and session export."""
 import json
 import logging
 import re
@@ -165,8 +165,22 @@ QA_Q = re.compile(r"^[\s*_-]*Q\s*[*_]*\s*:\s*[*_]*\s*(.+)$", re.I)
 QA_A = re.compile(r"^[\s*_-]*A\s*[*_]*\s*:\s*[*_]*\s*(.*)$", re.I)
 
 
+def clean_md_fence(text):
+    """Unwrap a single outer ``` or ```markdown fence if the LLM wrapped the entire answer."""
+    s = (text or "").strip()
+    if s.startswith("```") and s.endswith("```") and s.count("```") == 2:
+        inner = s.splitlines()
+        if (
+            len(inner) >= 3
+            and inner[0].lstrip().startswith("```")
+            and inner[0].strip()[3:].lower() in ("", "md", "markdown")
+        ):
+            return "\n".join(inner[1:-1]).strip()
+    return s
+
+
 def parse_qa(text):
-    """Розбирає відповідь Q&A ('Q: ...\\nA:\\n<markdown>'). Повертає (q, a) або (None, None)."""
+    """Parse a Q&A response ('Q: ...\\nA:\\n<markdown>'). Returns (q, a) or (None, None)."""
     raw = (text or "").strip()
     if not raw or raw.strip(" .*\n").upper() == "NONE":
         return None, None
@@ -185,11 +199,7 @@ def parse_qa(text):
                 continue
         else:
             a_lines.append(line.rstrip())
-    ans = "\n".join(a_lines).strip()
-    if ans.startswith("```") and ans.endswith("```") and ans.count("```") == 2:
-        inner = ans.splitlines()
-        if len(inner) >= 3 and inner[0].lstrip().startswith("```") and inner[0].strip()[3:].lower() in ("", "md", "markdown"):
-            ans = "\n".join(inner[1:-1]).strip()
+    ans = clean_md_fence("\n".join(a_lines))
     if not q or not ans or q.strip(" .*").upper() == "NONE" or ans.strip(" .*").upper() == "NONE":
         return None, None
     return q, ans
@@ -357,7 +367,10 @@ class Engine:
 
     def _levels(self):
         while self.listening:
-            BUS.emit("levels", level=round(min(1.0, max((s.level for s in self.sources), default=0) * 12), 3))
+            with self.lock:
+                sources = list(self.sources)
+            level = round(min(1.0, max((s.level for s in sources), default=0) * 12), 3)
+            BUS.emit("levels", level=level)
             time.sleep(0.2)
 
     def on_segment(self, who, audio, t_end=None):
@@ -370,6 +383,7 @@ class Engine:
         now = time.time()
         spk = spk or ("ME" if who == "me" else "S1")
         start = start if start is not None else now
+        words = len(text.split())
         with self.lock:
             last = self.transcript[-1] if self.transcript else None
             if last and last["spk"] == spk and start - last["end"] < 3.0:
@@ -379,24 +393,25 @@ class Engine:
             else:
                 self.transcript.append({"spk": spk, "text": text, "t": now, "end": end or now})
                 merged = False
-            self._words_since += len(text.split())
+            full_text = self.transcript[-1]["text"]
+            self._words_since += words
+            self._profile_words += words
             self._rev += 1
         METRICS.inc("lines")
-        BUS.emit("line", spk=spk, text=self.transcript[-1]["text"], merged=merged, lag=round(lag, 1))
-        self._profile_words += len(text.split())
+        BUS.emit("line", spk=spk, text=full_text, merged=merged, lag=round(lag, 1))
         self.kick()
         self.maybe_profile()
 
     # ------------------------------------------------------------- engine loop
     def kick(self, force=False):
-        """Новий текст → одразу новий запит (до MAX_INFLIGHT паралельно). Застарілі відповіді відкидаються."""
+        """Schedule a thread update step (up to MAX_INFLIGHT in parallel); stale outputs are dropped."""
         if self.settings.get("answer_questions"):
             self.maybe_answer(force=force)
-        last = self.transcript[-1]["text"] if self.transcript else ""
-        question = self._words_since >= 3 and bool(QUESTION.search(last[-160:]))
-        if not (force or question or self._words_since >= self.MIN_NEW_WORDS):
-            return
         with self.lock:
+            last = self.transcript[-1]["text"] if self.transcript else ""
+            question = self._words_since >= 3 and bool(QUESTION.search(last[-160:]))
+            if not (force or question or self._words_since >= self.MIN_NEW_WORDS):
+                return
             if self._inflight >= self.MAX_INFLIGHT:
                 self._dirty = True
                 return
@@ -404,7 +419,8 @@ class Engine:
             self._seq += 1
             seq = self._seq
             self._words_since = 0
-        METRICS.gauge("llm_inflight", self._inflight)
+            inflight = self._inflight
+        METRICS.gauge("llm_inflight", inflight)
         threading.Thread(target=self._run, args=(seq,), daemon=True, name=f"step-{seq}").start()
 
     def _run(self, seq):
@@ -433,15 +449,18 @@ class Engine:
     PROFILE_EVERY = 90            # далі уточнюємо раз на ~90 с (якщо є новий текст) або після 2 нових тем
 
     def maybe_profile(self):
-        if self._profile_busy:
-            return
         now = time.time()
-        first = not self.profile and self._profile_words >= self.PROFILE_FIRST_WORDS
-        refresh = self.profile and self._profile_words >= 60 and (
-            now - self._profile_t >= self.PROFILE_EVERY or len(self.topics) - self._profile_topics >= 2)
-        if first or refresh:
+        with self.lock:
+            if self._profile_busy:
+                return
+            first = not self.profile and self._profile_words >= self.PROFILE_FIRST_WORDS
+            refresh = self.profile and self._profile_words >= 60 and (
+                now - self._profile_t >= self.PROFILE_EVERY or len(self.topics) - self._profile_topics >= 2
+            )
+            if not (first or refresh):
+                return
             self._profile_busy = True
-            threading.Thread(target=self.update_profile, daemon=True, name="profile").start()
+        threading.Thread(target=self.update_profile, daemon=True, name="profile").start()
 
     def update_profile(self):
         t0 = time.time()
@@ -465,7 +484,7 @@ class Engine:
                 "identify the field and stack from the questions. Also list words that are clearly misrecognised "
                 "versions of a term given the context (e.g. 'Volta' for 'Vault' in a secrets talk). Do not invent — if nothing fits, describe the "
                 "content generically.\n"
-                f"Answer with ONE JSON object, nothing else:\n"
+                "Answer with ONE JSON object, nothing else:\n"
                 '{"names_heard": ["..."], "identified_work": "<known title or empty>", '
                 '"type": one of ' + json.dumps(CONTENT_TYPES) + ", "
                 f'"title": "<what it is, max 8 words, in {lang}>", '
@@ -753,11 +772,14 @@ class Engine:
         BUS.emit("note", topic=topic_id, took=round(llm_t, 2), e2e=round(e2e, 1), **note)
 
     def _checks(self, text):
-        """Перевірка фактів і «загальновідомості» паралельно. Повертає (правдиве, очевидне)."""
+        """Run fact verification and obviousness checks in parallel. Returns (is_true, is_obvious)."""
         res = {}
         t1 = threading.Thread(target=lambda: res.__setitem__("true", self.verify(text)), daemon=True)
         t2 = threading.Thread(target=lambda: res.__setitem__("obvious", self.is_obvious(text)), daemon=True)
-        t1.start(); t2.start(); t1.join(timeout=5); t2.join(timeout=5)
+        t1.start()
+        t2.start()
+        t1.join(timeout=5)
+        t2.join(timeout=5)
         return res.get("true", True), res.get("obvious", False)
 
     VERIFY_PROMPT = (
@@ -767,19 +789,22 @@ class Engine:
         "speakers said, do or plan count as correct. Recent software tools, AI models, frameworks and CLI tools "
         "(2024–2026) may be real even if unfamiliar — do NOT score below 30 solely for unfamiliarity unless the "
         "claim is clearly fabricated or contradictory. Reply with the number only.")
-    VERIFY_MIN = 30          # нижче — відкидаємо (на тестовому наборі 16/19: 1 хибне пройшло, 2 правдиві відкинуто)
+    VERIFY_MIN = 30          # reject claims scored below this threshold
 
     def verify(self, claim):
-        """Самоперевірка факту (≈0.1 с): модель оцінює ймовірність правдивості 0–100."""
+        """Self-verify a factual claim via LLM probability score (0-100)."""
         try:
-            ctx = self.topics[-1]["title"] if self.topics else ""
+            with self.lock:
+                ctx = self.topics[-1]["title"] if self.topics else ""
             user = f"Topic: {ctx}\nClaim: {claim.replace('**', '')}" if ctx and ctx != "—" else claim.replace("**", "")
-            out = self.llm.complete([{"role": "system", "content": self.VERIFY_PROMPT},
-                                     {"role": "user", "content": user}], max_tokens=4)
+            out = self.llm.complete(
+                [{"role": "system", "content": self.VERIFY_PROMPT}, {"role": "user", "content": user}],
+                max_tokens=4,
+            )
             m = re.search(r"\d+", out)
             return int(m.group()) >= self.VERIFY_MIN if m else True
         except Exception:
-            return True                              # перевірка недоступна — не блокуємо
+            return True                              # do not block notes if verification fails
 
     OBVIOUS_PROMPT = (
         "Decide if a note shown to a listener is OBVIOUS (adds nothing) or USEFUL. Audience: {aud}.\n"
@@ -800,19 +825,24 @@ class Engine:
         "Reply with exactly one word: OBVIOUS or USEFUL.")
 
     def audience(self):
-        p = self.profile
+        with self.lock:
+            p = dict(self.profile) if self.profile else None
+            recent = " ".join(x["text"] for x in self.transcript[-3:])
         if not p:
             return "general listener"
-        return f"{p.get('type', 'content')}: {p.get('title', '')}; listener reads notes in " \
-               f"{self._lang(' '.join(x['text'] for x in self.transcript[-3:]))}"
+        return f"{p.get('type', 'content')}: {p.get('title', '')}; listener reads notes in {self._lang(recent)}"
 
     def is_obvious(self, claim):
-        """Загальновідоме для цієї аудиторії (≈0.1 с). На тестовому наборі з прикладами — 12/14 стабільно."""
+        """Return True if the claim is trivial common knowledge for the detected audience."""
         aud = self.audience()
         try:
-            out = self.llm.complete([
-                {"role": "system", "content": self.OBVIOUS_PROMPT.format(aud=aud)},
-                {"role": "user", "content": f"Audience: {aud} | '{claim.replace('**', '')}'"}], max_tokens=3)
+            out = self.llm.complete(
+                [
+                    {"role": "system", "content": self.OBVIOUS_PROMPT.format(aud=aud)},
+                    {"role": "user", "content": f"Audience: {aud} | '{claim.replace('**', '')}'"},
+                ],
+                max_tokens=3,
+            )
             return out.strip().upper().startswith("OBVIOUS")
         except Exception:
             return False
@@ -822,6 +852,7 @@ class Engine:
 
         def run(i):
             res[i] = fn(items[i])
+
         ts = [threading.Thread(target=run, args=(i,), daemon=True) for i in range(len(items))]
         for t in ts:
             t.start()
@@ -830,16 +861,7 @@ class Engine:
         return res
 
     def _verify_many(self, claims):
-        res = [True] * len(claims)
-
-        def run(i):
-            res[i] = self.verify(claims[i])
-        ts = [threading.Thread(target=run, args=(i,), daemon=True) for i in range(len(claims))]
-        for t in ts:
-            t.start()
-        for t in ts:
-            t.join(timeout=5)
-        return res
+        return self._parallel(self.verify, claims, default=True)
 
     def brief(self, tp):
         """Розкрити тему одразу: ключові види/компоненти/варіанти. Паралельно до нотаток."""
@@ -1008,7 +1030,7 @@ class Engine:
             + self._qa_style_rules(lang)
         )
         user = (f"Already answered (do not repeat):\n{asked}\n\n"
-                f"Conversation:\n" + "\n".join(lines) + f"\n\n(Write Q and A in {lang}, or NONE.)")
+                "Conversation:\n" + "\n".join(lines) + f"\n\n(Write Q and A in {lang}, or NONE.)")
         return [{"role": "system", "content": sys_p}, {"role": "user", "content": user}]
 
     def _stream_llm(self, messages, max_tokens=420):
@@ -1022,12 +1044,7 @@ class Engine:
 
     @staticmethod
     def _clean_md_fence(ans):
-        s = (ans or "").strip()
-        if s.startswith("```") and s.endswith("```") and s.count("```") == 2:
-            inner = s.splitlines()
-            if len(inner) >= 3 and inner[0].lstrip().startswith("```") and inner[0].strip()[3:].lower() in ("", "md", "markdown"):
-                return "\n".join(inner[1:-1]).strip()
-        return s
+        return clean_md_fence(ans)
 
     @staticmethod
     def _split_partial_qa(raw):

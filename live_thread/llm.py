@@ -1,4 +1,4 @@
-"""Клієнт OpenAI-сумісного /v1/chat/completions (vLLM, sglang, llama.cpp, Ollama, OpenAI тощо)."""
+"""OpenAI-compatible /v1/chat/completions client (vLLM, sglang, llama.cpp, Ollama, OpenAI, etc.)."""
 import json
 import urllib.request
 
@@ -9,10 +9,15 @@ class LLM:
 
     def _request(self, messages, max_tokens, stream, temperature=0.1):
         s = self.settings
-        body = {"model": s["llm_model"] or "default", "messages": messages, "max_tokens": max_tokens,
-                "temperature": temperature, "stream": stream,
-                # вимикаємо «роздуми» у моделей, що їх підтримують (Qwen3 тощо); інші сервери це ігнорують
-                "chat_template_kwargs": {"enable_thinking": False}}
+        body = {
+            "model": s["llm_model"] or "default",
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": stream,
+            # Disable reasoning traces for models that support it (e.g. Qwen3); other servers ignore this.
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
         headers = {"Content-Type": "application/json"}
         if s.get("llm_api_key"):
             headers["Authorization"] = f"Bearer {s['llm_api_key']}"
@@ -23,7 +28,7 @@ class LLM:
             return json.load(r)["choices"][0]["message"]["content"] or ""
 
     def stream_chunks(self, messages, max_tokens=300):
-        """Потокова відповідь: віддає кожен текстовий фрагмент (дельту) одразу з моделі."""
+        """Yield incremental text deltas as they arrive from a streaming response."""
         with urllib.request.urlopen(self._request(messages, max_tokens, True), timeout=60) as r:
             for raw in r:
                 raw = raw.decode("utf-8", "ignore").strip()
@@ -37,7 +42,7 @@ class LLM:
                     yield delta
 
     def stream_lines(self, messages, max_tokens=300):
-        """Потокова відповідь: віддає кожен рядок, щойно модель його дописала."""
+        """Yield complete non-empty lines from a streaming response."""
         buf = ""
         for delta in self.stream_chunks(messages, max_tokens=max_tokens):
             buf += delta
